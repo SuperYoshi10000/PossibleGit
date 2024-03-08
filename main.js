@@ -148,6 +148,10 @@ class Branch {
     /** @type {string[][]} */
     #filepaths;
 
+    async get directory() {
+        return await this.repository.directory.getDirectoryHandle(path);
+    }
+
     get absolutePath() {
         return this.repository.path + "/" + this.path;
     }
@@ -169,26 +173,29 @@ class Branch {
      * @param {Branch} branch 
      * @returns {boolean}
      */
-    mergeTo(branch) {
+    async mergeTo(branch) {
         try {
-            return true;
+            if (!Branch.compare(this.serialize(), branch.serialize())) return false;
+            for (let [k, v] of this.files()) {
+                branch.putFile(k, v);
+            }
         } catch(e) {
             return false;
         }
     }
-    mergeToActive() {
-        return this.mergeTo(this.repository.activeBranch);
+    async mergeToActive() {
+        return await this.mergeTo(this.repository.activeBranch);
     }
     /**
      * 
      * @param {Branch} branch 
      * @returns {boolean}
      */
-    mergeFrom(branch) {
-        return branch.mergeTo(this);
+    async mergeFrom(branch) {
+        return await branch.mergeTo(this);
     }
-    mergeFromActive() {
-        return this.repository.activeBranch.mergeTo(this);
+    async mergeFromActive() {
+        return await this.repository.activeBranch.mergeTo(this);
     }
 
     /**
@@ -197,12 +204,38 @@ class Branch {
      */
     async files() {
         let l = new Array(this.#filepaths.length);
-        for (let p of this.#filepaths) {
-            let f = this.repository.directory;
-            for (let i of p.slice(0, -1)) f = await f.getDirectoryHandle(i);
-            l.push(await((await f.getFileHandle(p[p.length - 1])).getFile()));
-        }
+        for (let p of this.#filepaths) l.set(p.join("/"), await this.getFile(p));
         return l;
+    }
+    /**
+     * 
+     * @param {string[]} path 
+     */
+    async getFileHandle(path) {
+        let f = await this.getDir(path.slice(0, -1));
+        return await f.getFileHandle(path[path.length - 1], {create: true});
+    }
+    async getFile(path) {
+        return await(await this.getFileHandle(path)).getFile();
+    }
+
+    /**
+     * 
+     * @param {string[]} path 
+     */
+    async getDir(path) {
+        let f = this.repository.directory;
+        for (let i of path) f = await f.getDirectoryHandle(i, {create: true});
+        return f;
+    }
+    /**
+     * 
+     * @param {string[]} path 
+     * @param {File} file 
+     */
+    async putFile(path, file) {
+        let f = await this.getFileHandle(path);
+        (await f.createWritable()).write(file);
     }
 
     async serialize() {
@@ -220,7 +253,7 @@ class Branch {
      * @param {NonNullable<object>} b 
      * @returns {boolean}
      */
-    async compare(a, b) {
+    static async compare(a, b) {
         for (let k in a) {
             if (b[k] && a[k] != b[k]) return false;
         }
